@@ -1,6 +1,6 @@
 //
 //  LicenseConfig.swift
-//  LicenseManager
+//  Watchboat
 //
 //  Created by samuel Ailemen on 3/29/26.
 //
@@ -19,7 +19,7 @@ public struct LicenseConfig: Sendable {
     public init(
         appId: String,
         appSecret: String,
-        baseURL: URL = URL(string: "http://localhost:3000")!,
+        baseURL: URL = URL(string: "https://api.watchboat.com")!,
         keychainService: String = "",
         validationIntervalDays: Int? = 7,
         maxOfflineValidationDays: Int? = 30,
@@ -59,6 +59,6 @@ public struct LicenseConfig: Sendable {
         {
             return "\(bundleIdentifier).license"
         }
-        return "com.licensemanager.license"
+        return "com.watchboat.license"
     }
 }

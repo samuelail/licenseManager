@@ -1,6 +1,6 @@
 //
 //  PayloadSigner.swift
-//  LicenseManager
+//  Watchboat
 //
 //  Created by samuel Ailemen on 3/29/26.
 //
@@ -27,11 +27,12 @@ extension PayloadSignerError: LocalizedError {
 internal struct PayloadSigner {
     internal init() {}
 
-    internal func sign(body: [String: Any], secret: String) throws -> String {
+    internal func sign(body: [String: Any], timestamp: String, secret: String) throws -> String {
         let canonicalJSON = try Self.canonicalJSONString(from: body)
+        let signedPayload = "\(timestamp).\(canonicalJSON)"
         let keyData = Self.keyData(from: secret)
         let signature = HMAC<SHA256>.authenticationCode(
-            for: Data(canonicalJSON.utf8),
+            for: Data(signedPayload.utf8),
             using: SymmetricKey(data: keyData)
         )
         return signature.map { String(format: "%02x", $0) }.joined()

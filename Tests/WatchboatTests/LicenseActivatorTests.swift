@@ -1,13 +1,13 @@
 //
 //  LicenseActivatorTests.swift
-//  LicenseManagerTests
+//  WatchboatTests
 //
 //  Created by samuel Ailemen on 3/29/26.
 //
 
 import Foundation
 import XCTest
-@testable import LicenseManager
+@testable import Watchboat
 
 final class LicenseActivatorTests: XCTestCase {
     override func setUp() {
@@ -31,7 +31,20 @@ final class LicenseActivatorTests: XCTestCase {
             defaults: defaults,
             requestHandler: { request in
                 XCTAssertEqual(request.value(forHTTPHeaderField: "X-App-Id"), "app-id")
-                XCTAssertNotNil(request.value(forHTTPHeaderField: "X-Signature"))
+                let timestamp = try XCTUnwrap(request.value(forHTTPHeaderField: "X-Timestamp"))
+                XCTAssertNotNil(Int(timestamp))
+
+                let signature = try XCTUnwrap(request.value(forHTTPHeaderField: "X-Signature"))
+                let body: [String: Any] = [
+                    "license_key": "KW-AAAA-BBBB-CCCC-DDDD",
+                    "machine_id": "MACHINE-1"
+                ]
+                let expectedSignature = try PayloadSigner().sign(
+                    body: body,
+                    timestamp: timestamp,
+                    secret: "test_secret"
+                )
+                XCTAssertEqual(signature, expectedSignature)
                 XCTAssertEqual(request.url?.path, "/v1/activate")
 
                 let responseBody = """
@@ -98,6 +111,8 @@ final class LicenseActivatorTests: XCTestCase {
             defaults: defaults,
             requestHandler: { request in
                 XCTAssertEqual(request.url?.path, "/v1/validate")
+                XCTAssertNotNil(request.value(forHTTPHeaderField: "X-Timestamp"))
+                XCTAssertNotNil(request.value(forHTTPHeaderField: "X-Signature"))
 
                 let responseBody = """
                 {
@@ -258,9 +273,9 @@ final class LicenseActivatorTests: XCTestCase {
     }
 
     private func makeDefaults() throws -> UserDefaults {
-        let suiteName = "LicenseManagerTests.\(UUID().uuidString)"
+        let suiteName = "WatchboatTests.\(UUID().uuidString)"
         guard let defaults = UserDefaults(suiteName: suiteName) else {
-            throw NSError(domain: "LicenseManagerTests", code: 1)
+            throw NSError(domain: "WatchboatTests", code: 1)
         }
         defaults.set(suiteName, forKey: "suiteName")
         return defaults

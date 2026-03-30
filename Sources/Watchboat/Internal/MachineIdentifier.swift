@@ -1,6 +1,6 @@
 //
 //  MachineIdentifier.swift
-//  LicenseManager
+//  Watchboat
 //
 //  Created by samuel Ailemen on 3/29/26.
 //
@@ -16,7 +16,7 @@ import UIKit
 #endif
 
 internal enum MachineIdentifier {
-    private static let fallbackKey = "LicenseManager.machineIdentifier"
+    private static let fallbackKey = "Watchboat.machineIdentifier"
 
     @MainActor
     internal static func id() -> String {

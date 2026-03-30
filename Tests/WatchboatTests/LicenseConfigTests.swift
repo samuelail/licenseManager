@@ -1,18 +1,18 @@
 //
 //  LicenseConfigTests.swift
-//  LicenseManagerTests
+//  WatchboatTests
 //
 //  Created by samuel Ailemen on 3/29/26.
 //
 
 import XCTest
-@testable import LicenseManager
+@testable import Watchboat
 
 final class LicenseConfigTests: XCTestCase {
     func testDefaultsProvideLocalBaseURLAndNonEmptyKeychainService() {
         let config = LicenseConfig(appId: "app-id", appSecret: "secret")
 
-        XCTAssertEqual(config.baseURL.absoluteString, "http://localhost:3000")
+        XCTAssertEqual(config.baseURL.absoluteString, "https://api.watchboat.com")
         XCTAssertEqual(config.validationIntervalDays, 7)
         XCTAssertEqual(config.maxOfflineValidationDays, 30)
         XCTAssertFalse(config.keychainService.isEmpty)

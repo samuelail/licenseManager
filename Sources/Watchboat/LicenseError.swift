@@ -1,6 +1,6 @@
 //
 //  LicenseError.swift
-//  LicenseManager
+//  Watchboat
 //
 //  Created by samuel Ailemen on 3/29/26.
 //

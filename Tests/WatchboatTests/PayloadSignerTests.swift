@@ -1,12 +1,12 @@
 //
 //  PayloadSignerTests.swift
-//  LicenseManagerTests
+//  WatchboatTests
 //
 //  Created by samuel Ailemen on 3/29/26.
 //
 
 import XCTest
-@testable import LicenseManager
+@testable import Watchboat
 
 final class PayloadSignerTests: XCTestCase {
     func testCanonicalizationSortsFlatKeys() throws {
@@ -38,8 +38,12 @@ final class PayloadSignerTests: XCTestCase {
             "license_key": "KW-XXXX-XXXX"
         ]
 
-        let signature = try signer.sign(body: input, secret: "test_secret")
-        XCTAssertEqual(signature, "7161b977f229cc741c5491517c30418a741be9c72046f124a2b1c64efa784b37")
+        let signature = try signer.sign(
+            body: input,
+            timestamp: "1700000000",
+            secret: "test_secret"
+        )
+        XCTAssertEqual(signature, "229aaba7e6761d1f215e8155050f698c893a11fb05811e840ddeaefe01c80fd2")
     }
 
     func testSigningSupportsHexSecret() throws {
@@ -50,7 +54,24 @@ final class PayloadSignerTests: XCTestCase {
         ]
 
         // Hex encoding of "test_secret"
-        let signature = try signer.sign(body: input, secret: "746573745f736563726574")
-        XCTAssertEqual(signature, "7161b977f229cc741c5491517c30418a741be9c72046f124a2b1c64efa784b37")
+        let signature = try signer.sign(
+            body: input,
+            timestamp: "1700000000",
+            secret: "746573745f736563726574"
+        )
+        XCTAssertEqual(signature, "229aaba7e6761d1f215e8155050f698c893a11fb05811e840ddeaefe01c80fd2")
+    }
+
+    func testSigningChangesWhenTimestampChanges() throws {
+        let signer = PayloadSigner()
+        let input: [String: Any] = [
+            "machine_id": "ABC-123",
+            "license_key": "KW-XXXX-XXXX"
+        ]
+
+        let one = try signer.sign(body: input, timestamp: "1700000000", secret: "test_secret")
+        let two = try signer.sign(body: input, timestamp: "1700000001", secret: "test_secret")
+
+        XCTAssertNotEqual(one, two)
     }
 }

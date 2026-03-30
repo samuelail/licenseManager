@@ -1,36 +1,36 @@
 // swift-tools-version: 6.0
 //
 //  Package.swift
-//  LicenseManager
+//  Watchboat
 //
 //  Created by samuel Ailemen on 3/29/26.
 //
 import PackageDescription
 
 let package = Package(
-    name: "LicenseManager",
+    name: "Watchboat",
     platforms: [
         .macOS(.v13),
         .iOS(.v15)
     ],
     products: [
         .library(
-            name: "LicenseManager",
-            targets: ["LicenseManager"]
+            name: "Watchboat",
+            targets: ["Watchboat"]
         )
     ],
     targets: [
         .target(
-            name: "LicenseManager",
-            path: "Sources/LicenseManager",
+            name: "Watchboat",
+            path: "Sources/Watchboat",
             linkerSettings: [
                 .linkedFramework("IOKit", .when(platforms: [.macOS]))
             ]
         ),
         .testTarget(
-            name: "LicenseManagerTests",
-            dependencies: ["LicenseManager"],
-            path: "Tests/LicenseManagerTests"
+            name: "WatchboatTests",
+            dependencies: ["Watchboat"],
+            path: "Tests/WatchboatTests"
         )
     ]
 )

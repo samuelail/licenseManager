@@ -1,10 +1,10 @@
-# LicenseManager
+# Watchboat
 
 A Swift client SDK for managing license activation and validation in iOS and macOS apps.
 
 ## Why Use It
 
-`LicenseManager` helps you ship paid license features faster without building your own entitlement state manager.
+`Watchboat` helps you ship paid license features faster without building your own entitlement state manager.
 
 What it improves in your app flow:
 
@@ -32,7 +32,7 @@ What it improves in your app flow:
 https://github.com/samuelail/licenseManager
 ```
 
-4. Add the `LicenseManager` product to your app target.
+4. Add the `Watchboat` product to your app target.
 
 ### Package.swift
 
@@ -43,14 +43,14 @@ https://github.com/samuelail/licenseManager
 Then add to your target dependencies:
 
 ```swift
-.product(name: "LicenseManager", package: "licenseManager")
+.product(name: "Watchboat", package: "licenseManager")
 ```
 
 ## Quick Start
 
 ```swift
 import SwiftUI
-import LicenseManager
+import Watchboat
 
 @main
 struct MyApp: App {
@@ -77,7 +77,7 @@ struct MyApp: App {
 
 ```swift
 import SwiftUI
-import LicenseManager
+import Watchboat
 
 struct LicenseView: View {
     @EnvironmentObject var license: LicenseActivator
@@ -139,7 +139,7 @@ let config = LicenseConfig(
 
 Defaults:
 
-- `baseURL`: `http://localhost:3000`
+- `baseURL`: `https://api.watchboat.com`
 - `keychainService`: auto-generated from bundle id (fallback provided)
 - `validationIntervalDays`: `7`
 - `maxOfflineValidationDays`: `30`

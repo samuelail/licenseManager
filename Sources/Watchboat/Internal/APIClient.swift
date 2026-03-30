@@ -1,6 +1,6 @@
 //
 //  APIClient.swift
-//  LicenseManager
+//  Watchboat
 //
 //  Created by samuel Ailemen on 3/29/26.
 //
@@ -83,7 +83,14 @@ internal actor APIClient: LicenseAPIClientProtocol {
         request.setValue(config.appId, forHTTPHeaderField: "X-App-Id")
 
         do {
-            let signature = try signer.sign(body: body, secret: config.appSecret)
+            let timestamp = String(Int(Date().timeIntervalSince1970))
+            request.setValue(timestamp, forHTTPHeaderField: "X-Timestamp")
+
+            let signature = try signer.sign(
+                body: body,
+                timestamp: timestamp,
+                secret: config.appSecret
+            )
             request.setValue(signature, forHTTPHeaderField: "X-Signature")
             request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
         } catch {

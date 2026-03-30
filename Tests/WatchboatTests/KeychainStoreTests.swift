@@ -1,12 +1,12 @@
 //
 //  KeychainStoreTests.swift
-//  LicenseManagerTests
+//  WatchboatTests
 //
 //  Created by samuel Ailemen on 3/29/26.
 //
 
 import XCTest
-@testable import LicenseManager
+@testable import Watchboat
 
 final class KeychainStoreTests: XCTestCase {
     func testSaveLoadDeleteRoundTrip() throws {

@@ -1,6 +1,6 @@
 //
 //  LicenseActivator.swift
-//  LicenseManager
+//  Watchboat
 //
 //  Created by samuel Ailemen on 3/29/26.
 //
@@ -63,7 +63,7 @@ public final class LicenseActivator: ObservableObject {
         self.userDefaults = userDefaults
         self.machineIdentifier = machineIdentifier
 
-        let namespace = "LicenseManager.\(config.keychainService).\(config.appId)"
+        let namespace = "Watchboat.\(config.keychainService).\(config.appId)"
         self.activatedAtKey = "\(namespace).activatedAt"
         self.lastValidatedAtKey = "\(namespace).lastValidatedAt"
 
