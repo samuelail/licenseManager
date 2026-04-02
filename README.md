@@ -141,6 +141,7 @@ Defaults:
 
 - `baseURL`: `https://api.watchboat.com`
 - `keychainService`: auto-generated from bundle id (fallback provided)
+- `includeLocation`: `true`
 - `validationIntervalDays`: `7`
 - `maxOfflineValidationDays`: `30`
 - `keychainAccount`: `activation_code`
@@ -155,6 +156,18 @@ let config = LicenseConfig(
     appSecret: "YOUR_APP_SECRET",
     validationIntervalDays: nil,
     maxOfflineValidationDays: nil
+)
+```
+
+### Privacy: Disable IP Address Collection
+
+If you want to avoid sending the user's IP address:
+
+```swift
+let config = LicenseConfig(
+    appId: "YOUR_APP_ID",
+    appSecret: "YOUR_APP_SECRET",
+    includeLocation: false
 )
 ```
 

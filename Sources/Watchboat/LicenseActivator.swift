@@ -32,6 +32,7 @@ public final class LicenseActivator: ObservableObject {
     private let machineIdentifier: String
     private let activatedAtKey: String
     private let lastValidatedAtKey: String
+    private let locallyInvalidatedKey: String
 
     private var storedLicenseCode: String?
 
@@ -64,15 +65,30 @@ public final class LicenseActivator: ObservableObject {
         self.machineIdentifier = machineIdentifier
 
         let namespace = "Watchboat.\(config.keychainService).\(config.appId)"
-        self.activatedAtKey = "\(namespace).activatedAt"
-        self.lastValidatedAtKey = "\(namespace).lastValidatedAt"
+        let activatedAtKey = "\(namespace).activatedAt"
+        let lastValidatedAtKey = "\(namespace).lastValidatedAt"
+        let locallyInvalidatedKey = "\(namespace).locallyInvalidated"
+        let locallyInvalidated = userDefaults.bool(forKey: locallyInvalidatedKey)
 
-        if let code = try? keychainStore.load() {
-            self.storedLicenseCode = code
-            self.plan = .pro
-        } else {
+        self.activatedAtKey = activatedAtKey
+        self.lastValidatedAtKey = lastValidatedAtKey
+        self.locallyInvalidatedKey = locallyInvalidatedKey
+
+        let hasActivationHistory =
+            (userDefaults.object(forKey: activatedAtKey) as? Date) != nil
+            || (userDefaults.object(forKey: lastValidatedAtKey) as? Date) != nil
+
+        do {
+            if let code = try keychainStore.load(), !locallyInvalidated {
+                self.storedLicenseCode = code
+                self.plan = .pro
+            } else {
+                self.storedLicenseCode = nil
+                self.plan = .free
+            }
+        } catch {
             self.storedLicenseCode = nil
-            self.plan = .free
+            self.plan = (!locallyInvalidated && hasActivationHistory) ? .pro : .free
         }
 
         self.activationError = nil
@@ -96,6 +112,7 @@ public final class LicenseActivator: ObservableObject {
             let now = Date()
             userDefaults.set(now, forKey: activatedAtKey)
             userDefaults.set(now, forKey: lastValidatedAtKey)
+            userDefaults.removeObject(forKey: locallyInvalidatedKey)
 
             storedLicenseCode = normalizedCode
             plan = .pro
@@ -108,6 +125,7 @@ public final class LicenseActivator: ObservableObject {
     public func deactivate() {
         if let error = clearStoredLicense() {
             activationError = LicenseError.keychainError(error.localizedDescription).localizedDescription
+            return
         } else {
             activationError = nil
         }
@@ -115,72 +133,88 @@ public final class LicenseActivator: ObservableObject {
     }
 
     public func validateIfNeeded() async {
-        guard let code = loadStoredLicenseCode() else {
+        switch loadStoredLicenseCode() {
+        case .code(let code):
+            if shouldForceDeactivationDueToLongOfflinePeriod() {
+                markLocallyInvalidated()
+                _ = clearStoredLicense(forceLocalClearOnFailure: true)
+                plan = .free
+                if let days = config.maxOfflineValidationDays {
+                    activationError = "License validation expired after \(days) days offline. Please activate again."
+                } else {
+                    activationError = "License validation expired while offline. Please activate again."
+                }
+                return
+            }
+
+            guard shouldRunValidationNow() else {
+                return
+            }
+
+            do {
+                let result = try await apiClient.validate(
+                    licenseKey: code,
+                    machineID: machineIdentifier
+                )
+
+                if result.valid {
+                    userDefaults.set(Date(), forKey: lastValidatedAtKey)
+                    plan = .pro
+                    activationError = nil
+                } else {
+                    let fallback = LicenseError.serverError("License validation failed.")
+                    handleValidationError(fallback)
+                }
+            } catch {
+                handleValidationError(mapError(error))
+            }
+        case .missing:
             plan = .free
             return
-        }
-
-        if shouldForceDeactivationDueToLongOfflinePeriod() {
-            _ = clearStoredLicense()
-            plan = .free
-            if let days = config.maxOfflineValidationDays {
-                activationError = "License validation expired after \(days) days offline. Please activate again."
-            } else {
-                activationError = "License validation expired while offline. Please activate again."
-            }
+        case .error:
+            // Transient keychain read failures should not revoke local entitlement.
             return
-        }
-
-        guard shouldRunValidationNow() else {
-            return
-        }
-
-        do {
-            let result = try await apiClient.validate(
-                licenseKey: code,
-                machineID: machineIdentifier
-            )
-
-            if result.valid {
-                userDefaults.set(Date(), forKey: lastValidatedAtKey)
-                plan = .pro
-                activationError = nil
-            } else {
-                let fallback = LicenseError.serverError("License validation failed.")
-                handleValidationError(fallback)
-            }
-        } catch {
-            handleValidationError(mapError(error))
         }
     }
 
-    private func clearStoredLicense() -> Error? {
+    private func clearStoredLicense(forceLocalClearOnFailure: Bool = false) -> Error? {
         do {
             try keychainStore.delete()
-            storedLicenseCode = nil
-            userDefaults.removeObject(forKey: activatedAtKey)
-            userDefaults.removeObject(forKey: lastValidatedAtKey)
+            clearLocalLicenseState()
             return nil
         } catch {
-            storedLicenseCode = nil
-            userDefaults.removeObject(forKey: activatedAtKey)
-            userDefaults.removeObject(forKey: lastValidatedAtKey)
+            if forceLocalClearOnFailure {
+                clearLocalLicenseState()
+            }
             return error
         }
     }
 
-    private func loadStoredLicenseCode() -> String? {
+    private func clearLocalLicenseState() {
+        storedLicenseCode = nil
+        userDefaults.removeObject(forKey: activatedAtKey)
+        userDefaults.removeObject(forKey: lastValidatedAtKey)
+    }
+
+    private func loadStoredLicenseCode() -> StoredLicenseLoadResult {
+        if isLocallyInvalidated {
+            return .missing
+        }
+
         if let storedLicenseCode {
-            return storedLicenseCode
+            return .code(storedLicenseCode)
         }
 
         do {
             let loaded = try keychainStore.load()
             storedLicenseCode = loaded
-            return loaded
+            if let loaded {
+                return .code(loaded)
+            }
+            return .missing
         } catch {
             activationError = LicenseError.keychainError(error.localizedDescription).localizedDescription
-            return nil
+            return .error
         }
     }
 
@@ -190,7 +224,8 @@ public final class LicenseActivator: ObservableObject {
             // Keep current entitlement during temporary network failures.
             break
         case .licenseRevoked, .machineMismatch, .licenseNotFound, .inactiveLicense:
-            _ = clearStoredLicense()
+            markLocallyInvalidated()
+            _ = clearStoredLicense(forceLocalClearOnFailure: true)
             plan = .free
             activationError = error.localizedDescription
         default:
@@ -244,6 +279,20 @@ public final class LicenseActivator: ObservableObject {
             return licenseError
         }
         return .serverError(error.localizedDescription)
+    }
+
+    private var isLocallyInvalidated: Bool {
+        userDefaults.bool(forKey: locallyInvalidatedKey)
+    }
+
+    private func markLocallyInvalidated() {
+        userDefaults.set(true, forKey: locallyInvalidatedKey)
+    }
+
+    private enum StoredLicenseLoadResult {
+        case code(String)
+        case missing
+        case error
     }
 
     private static func maskedCode(_ code: String?) -> String? {

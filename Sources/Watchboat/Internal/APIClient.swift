@@ -16,16 +16,25 @@ internal actor APIClient: LicenseAPIClientProtocol {
     private let config: LicenseConfig
     private let signer: PayloadSigner
     private let session: URLSession
+    private let ipAddressResolver: any IPAddressResolving
     private let decoder: JSONDecoder
+    private var ipAddressTask: Task<String?, Never>?
+    private var cachedIPAddress: String?
+    private var didResolveIPAddress = false
 
     internal init(
         config: LicenseConfig,
         signer: PayloadSigner = PayloadSigner(),
-        session: URLSession = .shared
+        session: URLSession = .shared,
+        ipAddressResolver: any IPAddressResolving = IPAddressResolver()
     ) {
         self.config = config
         self.signer = signer
         self.session = session
+        self.ipAddressResolver = ipAddressResolver
+        self.ipAddressTask = config.includeLocation
+            ? Task { await ipAddressResolver.resolveIPAddress() }
+            : nil
 
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -82,17 +91,26 @@ internal actor APIClient: LicenseAPIClientProtocol {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(config.appId, forHTTPHeaderField: "X-App-Id")
 
+        var requestBody = body
+        if config.includeLocation {
+            if let ipAddress = await resolveIPAddress() {
+                requestBody["ip_address"] = ipAddress
+            } else {
+                requestBody["ip_address"] = NSNull()
+            }
+        }
+
         do {
             let timestamp = String(Int(Date().timeIntervalSince1970))
             request.setValue(timestamp, forHTTPHeaderField: "X-Timestamp")
 
             let signature = try signer.sign(
-                body: body,
+                body: requestBody,
                 timestamp: timestamp,
                 secret: config.appSecret
             )
             request.setValue(signature, forHTTPHeaderField: "X-Signature")
-            request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
+            request.httpBody = try JSONSerialization.data(withJSONObject: requestBody, options: [])
         } catch {
             throw LicenseError.serverError("Failed to create signed request: \(error.localizedDescription)")
         }
@@ -113,6 +131,25 @@ internal actor APIClient: LicenseAPIClientProtocol {
     private func makeURL(path: String) -> URL {
         let cleanedPath = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         return config.baseURL.appendingPathComponent(cleanedPath)
+    }
+
+    private func resolveIPAddress() async -> String? {
+        if didResolveIPAddress {
+            return cachedIPAddress
+        }
+
+        if let task = ipAddressTask {
+            let value = await task.value
+            cachedIPAddress = value
+            didResolveIPAddress = true
+            ipAddressTask = nil
+            return value
+        }
+
+        let value = await ipAddressResolver.resolveIPAddress()
+        cachedIPAddress = value
+        didResolveIPAddress = true
+        return value
     }
 
     private func decodeEnvelope<T: Decodable>(_ type: T.Type, from data: Data) throws -> APIEnvelope<T> {
@@ -164,7 +201,10 @@ internal actor APIClient: LicenseAPIClientProtocol {
             }
             return .serverError(message)
         case 401:
-            return .invalidSignature
+            if normalizedMessage.contains("signature") {
+                return .invalidSignature
+            }
+            return .serverError(message)
         case 403:
             if normalizedMessage.contains("deactivated") {
                 return .appDeactivated

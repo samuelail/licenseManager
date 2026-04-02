@@ -37,7 +37,8 @@ final class LicenseActivatorTests: XCTestCase {
                 let signature = try XCTUnwrap(request.value(forHTTPHeaderField: "X-Signature"))
                 let body: [String: Any] = [
                     "license_key": "KW-AAAA-BBBB-CCCC-DDDD",
-                    "machine_id": "MACHINE-1"
+                    "machine_id": "MACHINE-1",
+                    "ip_address": "203.0.113.10"
                 ]
                 let expectedSignature = try PayloadSigner().sign(
                     body: body,
@@ -81,6 +82,69 @@ final class LicenseActivatorTests: XCTestCase {
     }
 
     @MainActor
+    func testActivateTimestampAuthFailureReturnsServerMessage() async throws {
+        let keychain = InMemoryKeychainStore()
+        let defaults = try makeDefaults()
+        defer { clearDefaults(defaults) }
+
+        let manager = makeManager(
+            keychain: keychain,
+            defaults: defaults,
+            requestHandler: { request in
+                let responseBody = """
+                {
+                  "status": "unauthorized",
+                  "message": "Timestamp drift exceeds allowed window."
+                }
+                """
+                let response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 401,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!
+                return (response, Data(responseBody.utf8))
+            }
+        )
+
+        await manager.activate(code: "KW-AAAA-BBBB-CCCC-DDDD")
+
+        XCTAssertEqual(manager.plan, .free)
+        XCTAssertEqual(manager.activationError, "Timestamp drift exceeds allowed window.")
+    }
+
+    @MainActor
+    func testActivateSignatureFailureMapsToInvalidSignatureError() async throws {
+        let keychain = InMemoryKeychainStore()
+        let defaults = try makeDefaults()
+        defer { clearDefaults(defaults) }
+
+        let manager = makeManager(
+            keychain: keychain,
+            defaults: defaults,
+            requestHandler: { request in
+                let responseBody = """
+                {
+                  "status": "unauthorized",
+                  "message": "Invalid payload signature."
+                }
+                """
+                let response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 401,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!
+                return (response, Data(responseBody.utf8))
+            }
+        )
+
+        await manager.activate(code: "KW-AAAA-BBBB-CCCC-DDDD")
+
+        XCTAssertEqual(manager.activationError, LicenseError.invalidSignature.localizedDescription)
+    }
+
+    @MainActor
     func testValidateNetworkFailureKeepsProState() async throws {
         let keychain = InMemoryKeychainStore(code: "KW-AAAA-BBBB-CCCC-DDDD")
         let defaults = try makeDefaults()
@@ -98,6 +162,47 @@ final class LicenseActivatorTests: XCTestCase {
 
         XCTAssertEqual(manager.plan, .pro)
         XCTAssertEqual(keychain.code, "KW-AAAA-BBBB-CCCC-DDDD")
+    }
+
+    @MainActor
+    func testInitKeepsProWhenKeychainReadTemporarilyFails() async throws {
+        let keychain = FlakyLoadKeychainStore(code: "KW-AAAA-BBBB-CCCC-DDDD", failuresBeforeSuccess: 1)
+        let defaults = try makeDefaults()
+        defer { clearDefaults(defaults) }
+
+        let namespace = "Watchboat.com.test.license.app-id"
+        defaults.set(Date(), forKey: "\(namespace).activatedAt")
+
+        let manager = makeManager(
+            keychain: keychain,
+            defaults: defaults,
+            requestHandler: { request in
+                let responseBody = """
+                {
+                  "status": "success",
+                  "message": "License is valid.",
+                  "data": {
+                    "valid": true,
+                    "license_key": "KW-AAAA-BBBB-CCCC-DDDD",
+                    "machine_id": "MACHINE-1",
+                    "last_validated_at": "2026-03-29T20:36:12.186Z"
+                  }
+                }
+                """
+                let response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!
+                return (response, Data(responseBody.utf8))
+            }
+        )
+
+        XCTAssertEqual(manager.plan, .pro)
+
+        await manager.validateIfNeeded()
+        XCTAssertEqual(manager.plan, .pro)
     }
 
     @MainActor
@@ -142,6 +247,161 @@ final class LicenseActivatorTests: XCTestCase {
         XCTAssertEqual(manager.plan, .free)
         XCTAssertNil(keychain.code)
         XCTAssertEqual(manager.activationError, LicenseError.licenseRevoked.localizedDescription)
+    }
+
+    @MainActor
+    func testRevokedLicenseDoesNotResurrectAfterDeleteFailureAndReinit() async throws {
+        let keychain = FailingDeleteKeychainStore(code: "KW-AAAA-BBBB-CCCC-DDDD")
+        let defaults = try makeDefaults()
+        defer { clearDefaults(defaults) }
+
+        let manager = makeManager(
+            keychain: keychain,
+            defaults: defaults,
+            requestHandler: { request in
+                let responseBody = """
+                {
+                  "status": "error",
+                  "message": "This license has been revoked.",
+                  "data": {
+                    "valid": false,
+                    "reason": "revoked"
+                  }
+                }
+                """
+                let response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 403,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!
+                return (response, Data(responseBody.utf8))
+            }
+        )
+
+        await manager.validateIfNeeded()
+        XCTAssertEqual(manager.plan, .free)
+
+        let restartedManager = makeManager(
+            keychain: keychain,
+            defaults: defaults,
+            requestHandler: { request in
+                let response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!
+                return (response, Data())
+            }
+        )
+
+        XCTAssertEqual(restartedManager.plan, .free)
+    }
+
+    @MainActor
+    func testActivateDoesNotIncludeLocationWhenDisabled() async throws {
+        let keychain = InMemoryKeychainStore()
+        let defaults = try makeDefaults()
+        defer { clearDefaults(defaults) }
+
+        let manager = makeManager(
+            keychain: keychain,
+            defaults: defaults,
+            includeLocation: false,
+            requestHandler: { request in
+                let timestamp = try XCTUnwrap(request.value(forHTTPHeaderField: "X-Timestamp"))
+                let signature = try XCTUnwrap(request.value(forHTTPHeaderField: "X-Signature"))
+                let expectedBody: [String: Any] = [
+                    "license_key": "KW-AAAA-BBBB-CCCC-DDDD",
+                    "machine_id": "MACHINE-1"
+                ]
+                let expectedSignature = try PayloadSigner().sign(
+                    body: expectedBody,
+                    timestamp: timestamp,
+                    secret: "test_secret"
+                )
+                XCTAssertEqual(signature, expectedSignature)
+
+                let responseBody = """
+                {
+                  "status": "success",
+                  "message": "License activated successfully.",
+                  "data": {
+                    "license_key": "KW-AAAA-BBBB-CCCC-DDDD",
+                    "machine_id": "MACHINE-1",
+                    "activated_at": "2026-03-29T20:36:12.186Z"
+                  }
+                }
+                """
+
+                let response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!
+                return (response, Data(responseBody.utf8))
+            }
+        )
+
+        await manager.activate(code: "KW-AAAA-BBBB-CCCC-DDDD")
+
+        XCTAssertEqual(manager.plan, .pro)
+        XCTAssertNil(manager.activationError)
+    }
+
+    @MainActor
+    func testActivateIncludesNullIPAddressWhenEnabledButUnavailable() async throws {
+        let keychain = InMemoryKeychainStore()
+        let defaults = try makeDefaults()
+        defer { clearDefaults(defaults) }
+
+        let manager = makeManager(
+            keychain: keychain,
+            defaults: defaults,
+            ipAddress: nil,
+            requestHandler: { request in
+                let timestamp = try XCTUnwrap(request.value(forHTTPHeaderField: "X-Timestamp"))
+                let signature = try XCTUnwrap(request.value(forHTTPHeaderField: "X-Signature"))
+                let expectedBody: [String: Any] = [
+                    "license_key": "KW-AAAA-BBBB-CCCC-DDDD",
+                    "machine_id": "MACHINE-1",
+                    "ip_address": NSNull()
+                ]
+                let expectedSignature = try PayloadSigner().sign(
+                    body: expectedBody,
+                    timestamp: timestamp,
+                    secret: "test_secret"
+                )
+                XCTAssertEqual(signature, expectedSignature)
+
+                let responseBody = """
+                {
+                  "status": "success",
+                  "message": "License activated successfully.",
+                  "data": {
+                    "license_key": "KW-AAAA-BBBB-CCCC-DDDD",
+                    "machine_id": "MACHINE-1",
+                    "activated_at": "2026-03-29T20:36:12.186Z"
+                  }
+                }
+                """
+
+                let response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!
+                return (response, Data(responseBody.utf8))
+            }
+        )
+
+        await manager.activate(code: "KW-AAAA-BBBB-CCCC-DDDD")
+
+        XCTAssertEqual(manager.plan, .pro)
+        XCTAssertNil(manager.activationError)
     }
 
     @MainActor
@@ -239,9 +499,60 @@ final class LicenseActivatorTests: XCTestCase {
     }
 
     @MainActor
+    func testDeactivateKeepsProWhenKeychainDeleteFails() async throws {
+        let keychain = FailingDeleteKeychainStore(code: "KW-AAAA-BBBB-CCCC-DDDD")
+        let defaults = try makeDefaults()
+        defer { clearDefaults(defaults) }
+
+        let manager = makeManager(
+            keychain: keychain,
+            defaults: defaults,
+            requestHandler: { request in
+                let response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!
+                return (response, Data())
+            }
+        )
+
+        manager.deactivate()
+
+        XCTAssertEqual(manager.plan, .pro)
+        XCTAssertFalse(manager.activationError?.isEmpty ?? true)
+    }
+
+    func testAPIClientPrefetchesIPAddressOnInitWhenLocationEnabled() async throws {
+        let prefetchExpectation = expectation(description: "IPAddress prefetched")
+        prefetchExpectation.assertForOverFulfill = false
+
+        let resolver = PrefetchIPAddressResolver {
+            prefetchExpectation.fulfill()
+        }
+
+        let config = LicenseConfig(
+            appId: "app-id",
+            appSecret: "test_secret",
+            includeLocation: true
+        )
+
+        _ = APIClient(
+            config: config,
+            session: .shared,
+            ipAddressResolver: resolver
+        )
+
+        await fulfillment(of: [prefetchExpectation], timeout: 1.0)
+    }
+
+    @MainActor
     private func makeManager(
-        keychain: InMemoryKeychainStore,
+        keychain: KeychainStoreProtocol,
         defaults: UserDefaults,
+        ipAddress: String? = "203.0.113.10",
+        includeLocation: Bool = true,
         validationIntervalDays: Int? = 7,
         maxOfflineValidationDays: Int? = 30,
         requestHandler: @escaping MockURLProtocol.RequestHandler
@@ -253,6 +564,7 @@ final class LicenseActivatorTests: XCTestCase {
             appSecret: "test_secret",
             baseURL: URL(string: "https://license-api.example.com")!,
             keychainService: "com.test.license",
+            includeLocation: includeLocation,
             validationIntervalDays: validationIntervalDays,
             maxOfflineValidationDays: maxOfflineValidationDays
         )
@@ -261,7 +573,11 @@ final class LicenseActivatorTests: XCTestCase {
         sessionConfig.protocolClasses = [MockURLProtocol.self]
         let session = URLSession(configuration: sessionConfig)
 
-        let apiClient = APIClient(config: config, session: session)
+        let apiClient = APIClient(
+            config: config,
+            session: session,
+            ipAddressResolver: StubIPAddressResolver(ipAddress: ipAddress)
+        )
 
         return LicenseActivator(
             config: config,
@@ -286,6 +602,73 @@ final class LicenseActivatorTests: XCTestCase {
             return
         }
         defaults.removePersistentDomain(forName: suiteName)
+    }
+}
+
+private struct StubIPAddressResolver: IPAddressResolving {
+    let ipAddress: String?
+
+    func resolveIPAddress() async -> String? {
+        ipAddress
+    }
+}
+
+private final class PrefetchIPAddressResolver: IPAddressResolving, @unchecked Sendable {
+    private let onResolve: @Sendable () -> Void
+
+    init(onResolve: @escaping @Sendable () -> Void) {
+        self.onResolve = onResolve
+    }
+
+    func resolveIPAddress() async -> String? {
+        onResolve()
+        return "203.0.113.10"
+    }
+}
+
+private final class FailingDeleteKeychainStore: KeychainStoreProtocol {
+    var code: String?
+
+    init(code: String?) {
+        self.code = code
+    }
+
+    func save(code: String) throws {
+        self.code = code
+    }
+
+    func load() throws -> String? {
+        code
+    }
+
+    func delete() throws {
+        throw NSError(domain: "WatchboatTests", code: 99, userInfo: [NSLocalizedDescriptionKey: "Delete failed"])
+    }
+}
+
+private final class FlakyLoadKeychainStore: KeychainStoreProtocol {
+    var code: String?
+    private var failuresBeforeSuccess: Int
+
+    init(code: String?, failuresBeforeSuccess: Int) {
+        self.code = code
+        self.failuresBeforeSuccess = failuresBeforeSuccess
+    }
+
+    func save(code: String) throws {
+        self.code = code
+    }
+
+    func load() throws -> String? {
+        if failuresBeforeSuccess > 0 {
+            failuresBeforeSuccess -= 1
+            throw NSError(domain: "WatchboatTests", code: 98, userInfo: [NSLocalizedDescriptionKey: "Temporary keychain read failure"])
+        }
+        return code
+    }
+
+    func delete() throws {
+        code = nil
     }
 }
 

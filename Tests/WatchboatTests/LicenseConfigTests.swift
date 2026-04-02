@@ -13,9 +13,20 @@ final class LicenseConfigTests: XCTestCase {
         let config = LicenseConfig(appId: "app-id", appSecret: "secret")
 
         XCTAssertEqual(config.baseURL.absoluteString, "https://api.watchboat.com")
+        XCTAssertTrue(config.includeLocation)
         XCTAssertEqual(config.validationIntervalDays, 7)
         XCTAssertEqual(config.maxOfflineValidationDays, 30)
         XCTAssertFalse(config.keychainService.isEmpty)
+    }
+
+    func testCanDisableLocationCollection() {
+        let config = LicenseConfig(
+            appId: "app-id",
+            appSecret: "secret",
+            includeLocation: false
+        )
+
+        XCTAssertFalse(config.includeLocation)
     }
 
     func testNilIntervalsDisableValidationTimers() {

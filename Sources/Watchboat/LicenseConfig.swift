@@ -12,6 +12,7 @@ public struct LicenseConfig: Sendable {
     public let appSecret: String
     public let baseURL: URL
     public let keychainService: String
+    public let includeLocation: Bool
     public let validationIntervalDays: Int?
     public let maxOfflineValidationDays: Int?
     public let keychainAccount: String
@@ -21,6 +22,7 @@ public struct LicenseConfig: Sendable {
         appSecret: String,
         baseURL: URL = URL(string: "https://api.watchboat.com")!,
         keychainService: String = "",
+        includeLocation: Bool = true,
         validationIntervalDays: Int? = 7,
         maxOfflineValidationDays: Int? = 30,
         keychainAccount: String = "activation_code"
@@ -32,6 +34,7 @@ public struct LicenseConfig: Sendable {
         self.keychainService = normalizedService.isEmpty
             ? LicenseConfig.defaultKeychainService()
             : normalizedService
+        self.includeLocation = includeLocation
         self.validationIntervalDays = validationIntervalDays
         self.maxOfflineValidationDays = maxOfflineValidationDays
         self.keychainAccount = keychainAccount
